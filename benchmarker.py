@@ -15,14 +15,27 @@ class Benchmarker:
         self, 
         model: torch.nn.Module, 
         inputs: BatchEncoding, 
+        compile: bool = False,
+        reduce_overhead: bool = False,
+        set_high_precision: bool = False,
         device: Optional[str] = None,
         output_dir: Optional[str] = None
     ) -> None:
         self.device = device if device is not None else get_device()
-        self.model = model.to(self.device)
-        self.model.eval()
         self.inputs = inputs.to(self.device)
+        self.compile = compile
+        self.reduce_overhead = reduce_overhead
+        self.set_high_precision = set_high_precision
         self.output_dir = output_dir if output_dir is not None else os.path.join(os.path.dirname(__file__), "results")
+        
+        model.to(self.device)
+        model.eval()
+        if self.compile and self.reduce_overhead:
+            model = torch.compile(model, mode="reduce-overhead")
+        elif self.compile and not self.reduce_overhead:
+            model = torch.compile(model)
+
+        self.model = model
 
     def batch_input(self, batch_size: int) -> Dict[str, torch.Tensor]:
         batched_inputs = {}
@@ -90,23 +103,12 @@ class Benchmarker:
     def run(
         self, 
         batch_size: int,
-        compile: bool, 
-        set_high_precision: bool, 
-        reduce_overhead: bool,
         num_runs: int = 100,
         warmup: bool = True,
         warmup_iterations: int = 1
     ) -> None:
         model = self.model
-
-        if compile and not reduce_overhead:
-            print("Compiling...")
-            model = torch.compile(model)
-    
-        if compile and reduce_overhead:
-            model = torch.compile(model, mode="reduce-overhead")
-        
-        if set_high_precision:
+        if self.set_high_precision:
             torch.set_float32_matmul_precision("high")
 
         if warmup:
@@ -115,9 +117,16 @@ class Benchmarker:
         
         results = []
         batched_inputs = self.batch_input(batch_size)
-        description = f"Benchmarking with batch-size: {batch_size} - compile: {compile} - reduce-overhead: {reduce_overhead} - high-precision: {set_high_precision}"
+        description = (
+            f"Benchmarking with "
+            f"batch-size: {batch_size} - "
+            f"compile: {self.compile} - "
+            f"reduce-overhead: {self.reduce_overhead} - "
+            f"high-precision: {self.set_high_precision}"
+        )
+
         for iteration in tqdm(range(num_runs), desc=description, unit="# Run"):
-            time.sleep(1)
+            time.sleep(.5)
             try:
                 result = self.run_once(model, batched_inputs, batch_size)
                 results.append(result)
@@ -143,22 +152,22 @@ class Benchmarker:
         # Add more information about the run
         output["context_length"] = self.context_length
         output["batch_size"] = batch_size
-        output["compile"] = compile
-        output["reduce_overhead"] = reduce_overhead
-        output["set_high_precision"] = set_high_precision
+        output["compile"] = self.compile
+        output["reduce_overhead"] = self.reduce_overhead
+        output["set_high_precision"] = self.set_high_precision
         output["device_name"] = self.gpu_name
         if "out_of_memory" not in output.columns:
             output["out_of_memory"] = False
 
         filename = (
-            f"{self.gpu_name.replace(' ', '_')}-batch_size_{batch_size}-compile_{compile}"
-            f"-set_high_precision_{set_high_precision}-reduce_overhead_{reduce_overhead}.csv"
+            f"{self.gpu_name.replace(' ', '_')}-batch_size_{batch_size}-compile_{self.compile}"
+            f"-set_high_precision_{self.set_high_precision}-reduce_overhead_{self.reduce_overhead}.csv"
         )
         self.save_results(output, filename)
 
         self.reset()
 
-        if set_high_precision:
+        if self.set_high_precision:
             # Go back to default
             torch.set_float32_matmul_precision("highest")
     

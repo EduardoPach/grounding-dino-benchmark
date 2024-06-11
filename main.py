@@ -62,16 +62,19 @@ def main(args: argparse.Namespace) -> None:
     inputs = processor(images=image, text=text, return_tensors="pt")
 
     print("Initializing benchmarker")
-    benchmark = Benchmarker(model, inputs)
+    benchmark = Benchmarker(
+        model,
+        inputs,
+        compile=compile,
+        reduce_overhead=reduce_overhead,
+        set_high_precision=set_high_precision
+    )
 
     print("starting runs")
     for batch_size in range(1, max_batch_size + 1):
         # No optimization
         benchmark.run(
             batch_size=batch_size,
-            compile=compile,
-            set_high_precision=set_high_precision,
-            reduce_overhead=reduce_overhead,
             num_runs=num_runs,
         )
 
